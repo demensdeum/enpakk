@@ -4,9 +4,9 @@ CC = clang
 # Paths
 OPENCL_HEADERS = /opt/homebrew/Cellar/opencl-headers/2024.10.24/include/
 
-# Flags
-CFLAGS = -O2 -Wall -std=c11 -I$(OPENCL_HEADERS)
-LDFLAGS = -framework OpenCL -lz
+# Optimization Flags
+CFLAGS = -O3 -Wall -Wextra -march=native -std=c11 -flto -I$(OPENCL_HEADERS)
+LDFLAGS = -framework OpenCL -lz -flto
 
 # Targets
 TARGET = enpakk_gpu

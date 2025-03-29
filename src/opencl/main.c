@@ -1,3 +1,4 @@
+// main.c
 #include <CL/cl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,9 +42,14 @@ char *load_kernel_source(const char *filename) {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "Usage: %s <input.enpakk> <output>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <input.enpakk> <output> [--verbose]\n", argv[0]);
         return 1;
     }
+
+    int verbose = (argc >= 4 && strcmp(argv[3], "--verbose") == 0);
+
+    srand(time(NULL));
+    int random_seed = rand();
 
     FILE *fin = fopen(argv[1], "rb");
     if (!fin) { perror("fopen input"); return 1; }
@@ -51,12 +57,10 @@ int main(int argc, char *argv[]) {
     FILE *fout = fopen(argv[2], "wb");
     if (!fout) { perror("fopen output"); fclose(fin); return 1; }
 
-    // Read CRC32
     uint8_t crc_buf[CRC32_SIZE];
     fread(crc_buf, 1, CRC32_SIZE, fin);
     uint32_t expected_crc = crc_buf[0] | (crc_buf[1] << 8) | (crc_buf[2] << 16) | (crc_buf[3] << 24);
 
-    // Read hash data
     fseek(fin, 0, SEEK_END);
     long file_size = ftell(fin);
     fseek(fin, CRC32_SIZE, SEEK_SET);
@@ -65,7 +69,6 @@ int main(int argc, char *argv[]) {
     fread(hash_data, 1, hash_data_len, fin);
     fclose(fin);
 
-    // Build candidate list
     uint8_t *candidates[256][MAX_CANDIDATES];
     size_t candidate_counts[256] = {0};
     for (int b1 = 0; b1 < 256; b1++) {
@@ -80,7 +83,6 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    // Flatten candidate array
     int *block_indices = malloc(sizeof(int) * hash_data_len);
     int offset = 0;
     for (size_t i = 0; i < hash_data_len; i++) {
@@ -99,7 +101,6 @@ int main(int argc, char *argv[]) {
         offset += candidate_counts[h];
     }
 
-    // OpenCL setup
     cl_platform_id platform;
     cl_device_id device;
     cl_context context;
@@ -126,7 +127,6 @@ int main(int argc, char *argv[]) {
 
     int outputs_to_try = 100000;
     int buffer_size = hash_data_len * 2;
-    uint8_t *output_data = calloc(outputs_to_try * buffer_size, 1);
     uint8_t *found_output = calloc(buffer_size, 1);
     int found_flag = 0;
 
@@ -135,6 +135,7 @@ int main(int argc, char *argv[]) {
     cl_mem buf_outputs = clCreateBuffer(context, CL_MEM_WRITE_ONLY, outputs_to_try * buffer_size, NULL, &err);
     cl_mem buf_found_flag = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(int), &found_flag, &err);
     cl_mem buf_found_output = clCreateBuffer(context, CL_MEM_WRITE_ONLY, buffer_size, NULL, &err);
+    cl_mem buf_seed = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int), &random_seed, &err);
 
     CHECK_ERROR(err, "clCreateBuffer");
 
@@ -146,42 +147,32 @@ int main(int argc, char *argv[]) {
     CHECK_ERROR(clSetKernelArg(kernel, 5, sizeof(cl_mem), &buf_outputs), "arg5");
     CHECK_ERROR(clSetKernelArg(kernel, 6, sizeof(cl_mem), &buf_found_flag), "arg6");
     CHECK_ERROR(clSetKernelArg(kernel, 7, sizeof(cl_mem), &buf_found_output), "arg7");
+    CHECK_ERROR(clSetKernelArg(kernel, 8, sizeof(cl_mem), &buf_seed), "arg8");
 
     size_t global_work_size = outputs_to_try;
-    CHECK_ERROR(clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_work_size, NULL, 0, NULL, NULL), "enqueue");
+    int attempt = 0;
 
-    clFinish(queue);
+    while (1) {
+        found_flag = 0;
+        random_seed = rand();
+        clEnqueueWriteBuffer(queue, buf_found_flag, CL_TRUE, 0, sizeof(int), &found_flag, 0, NULL, NULL);
+        clEnqueueWriteBuffer(queue, buf_seed, CL_TRUE, 0, sizeof(int), &random_seed, 0, NULL, NULL);
 
-    clEnqueueReadBuffer(queue, buf_found_flag, CL_TRUE, 0, sizeof(int), &found_flag, 0, NULL, NULL);
-    if (found_flag) {
-        clEnqueueReadBuffer(queue, buf_found_output, CL_TRUE, 0, buffer_size, found_output, 0, NULL, NULL);
-        fwrite(found_output, 1, buffer_size, fout);
-        printf("[✓] Decompression complete!\n");
-    } else {
-        printf("[X] Failed to find valid CRC match.\n");
-    }
+        clEnqueueNDRangeKernel(queue, kernel, 1, NULL, &global_work_size, NULL, 0, NULL, NULL);
+        clFinish(queue);
 
-    // Cleanup
-    for (int h = 0; h < 256; h++) {
-        for (size_t j = 0; j < candidate_counts[h]; j++) {
-            free(candidates[h][j]);
+        clEnqueueReadBuffer(queue, buf_found_flag, CL_TRUE, 0, sizeof(int), &found_flag, 0, NULL, NULL);
+        if (found_flag) {
+            clEnqueueReadBuffer(queue, buf_found_output, CL_TRUE, 0, buffer_size, found_output, 0, NULL, NULL);
+            fwrite(found_output, 1, buffer_size, fout);
+            if (verbose) printf("[\u2713] Decompression complete after %d attempts!\n", attempt + 1);
+            break;
+        } else {
+            if (verbose) printf("[TRY %d] No match yet...\n", attempt + 1);
         }
+        attempt++;
     }
-    free(hash_data);
-    free(flat_blocks);
-    free(block_indices);
-    free(output_data);
-    free(found_output);
-    free(kernel_src);
-    clReleaseMemObject(buf_blocks);
-    clReleaseMemObject(buf_indices);
-    clReleaseMemObject(buf_outputs);
-    clReleaseMemObject(buf_found_flag);
-    clReleaseMemObject(buf_found_output);
-    clReleaseKernel(kernel);
-    clReleaseProgram(program);
-    clReleaseCommandQueue(queue);
-    clReleaseContext(context);
+
     fclose(fout);
     return 0;
 }
