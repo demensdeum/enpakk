@@ -2,8 +2,9 @@ import argparse
 import hashlib
 import os
 import random
+from multiprocessing import Pool, cpu_count
 
-BLOCK_SIZE = 32
+BLOCK_SIZE = 3
 
 def compress_file(input_path, output_path):
     with open(input_path, "rb") as fin, open(output_path, "wb") as fout:
@@ -11,20 +12,32 @@ def compress_file(input_path, output_path):
             md5 = hashlib.md5(block).digest()
             fout.write(md5)
 
+def try_match_block(target_md5: bytes, _):
+    candidate = os.urandom(BLOCK_SIZE)
+    if hashlib.md5(candidate).digest() == target_md5:
+        return candidate
+    return None
+
+def decompress_block_parallel(md5: bytes, max_attempts: int, workers: int = cpu_count()):
+    print(f"    🧠 Brute-forcing with {workers} workers...")
+    with Pool(processes=workers) as pool:
+        for attempt_start in range(0, max_attempts, workers):
+            tasks = [md5] * workers
+            results = pool.starmap(try_match_block, zip(tasks, range(workers)))
+            for result in results:
+                if result is not None:
+                    return result
+    raise ValueError("Decompression failed: no match found.")
+
 def decompress_file(input_path, output_path, max_attempts=10**8):
+    from multiprocessing import cpu_count
     with open(input_path, "rb") as fin, open(output_path, "wb") as fout:
         block_index = 0
         while md5 := fin.read(16):
             print(f"[+] Decompressing block {block_index}...")
-            for attempt in range(max_attempts):
-                candidate = os.urandom(BLOCK_SIZE)
-                if hashlib.md5(candidate).digest() == md5:
-                    fout.write(candidate)
-                    print(f"    ✓ Found match after {attempt + 1} attempts")
-                    break
-            else:
-                print(f"    ✗ Failed to find match after {max_attempts} attempts")
-                raise ValueError("Decompression failed for a block.")
+            block = decompress_block_parallel(md5, max_attempts, workers=cpu_count())
+            fout.write(block)
+            print(f"    ✓ Block {block_index} recovered")
             block_index += 1
 
 def main():
