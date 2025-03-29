@@ -11,9 +11,10 @@ Decompression is performed using brute-force random guessing until the reconstru
 ## 📦 Features
 
 - Compresses 2-byte blocks into 1-byte CRC-8 hashes
-- Adds a CRC32 checksum of the original input
-- Decompression tries random block candidates until the CRC32 matches
-- Pure Python, no dependencies (uses `zlib` for CRC32)
+- Adds a CRC32 checksum of the original input (stored at file start)
+- Randomized decompression via brute-force search
+- Implemented in **Python**, **C++**, and **C**
+- C/C++ builds provided via a single `Makefile`
 
 ---
 
