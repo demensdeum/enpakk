@@ -3,7 +3,7 @@ import hashlib
 import os
 import random
 
-BLOCK_SIZE = 3
+BLOCK_SIZE = 32
 
 def compress_file(input_path, output_path):
     with open(input_path, "rb") as fin, open(output_path, "wb") as fout:
