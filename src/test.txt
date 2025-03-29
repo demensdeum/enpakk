@@ -1,0 +1,7 @@
+Enpakk (Enthropy Pack Kompressor) is an experimental, block-based compression tool that uses randomized encoding and per-block integrity verification.
+
+Unlike traditional compressors that rely on pattern detection and redundancy elimination, Enpakk encodes each block of data using a pseudorandom sequence generated from a unique seed. This creates a form of controlled chaos in the compressed output.
+
+To ensure data integrity, every block stores an MD5 checksum of its original content. During decompression, this checksum is used to verify that each block has been correctly restored, allowing Enpakk to detect data corruption or tampering.
+
+Enpakk is not designed for maximum compression ratio, but rather as an exploration of alternative encoding methods. It's suitable for prototyping, obfuscation, and studying the effects of randomness in compression.
