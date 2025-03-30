@@ -71,6 +71,29 @@ Decompression:
 
 ---
 
+## 🌍 Real World Example
+
+Trying to compress the text `"ABC"`:
+
+```bash
+echo -n "ABC" > abc.txt
+python enpakk.py compress abc.txt abc.enpakk
+python decompress.py abc.enpakk result.txt
+```
+
+- Decompression is **fast**, as the brute-force space for 3 ASCII characters (6 bytes) is small.
+- However, the compressed file (`abc.enpakk`) is **larger** than the original (`abc.txt`) due to the 4-byte CRC32 header + 1.5 bytes (rounded up) for data.
+
+---
+
+## ❗ Limitations
+
+- The **main issue** in the current implementation is **CRC32 collisions** between the original and decompressed data. If a guessed output has the same CRC32 as the original input but different content, it will be falsely accepted as correct.
+- Decompression is non-deterministic and becomes **exponentially slower** with larger files.
+- Not guaranteed to produce the original data — only something with the same CRC32.
+
+---
+
 ## 🧪 Why?
 
 - For fun
